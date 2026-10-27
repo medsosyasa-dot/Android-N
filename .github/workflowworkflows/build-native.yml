@@ -1,0 +1,41 @@
+name: Build CTR Native
+on: workflow_dispatch
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: unzip -q ctr-native-android-patched.zip
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Patch source
+        working-directory: ctr-native-android-0.1.0
+        run: |
+          python3 - <<'PY'
+          s = open('main.c').read()
+          if 'native_android.c' not in s:
+              s = s.replace('#include <SDL3/SDL_main.h>\n', '#include <SDL3/SDL_main.h>\n#ifdef __ANDROID__\n#include <jni.h>\nchar *Platform_Android_GetStoredPath(void);\nvoid Platform_Android_PickFile(void);\n#endif\n', 1)
+              s = s.replace('#include "platform/native_str.c"\n', '#include "platform/native_str.c"\n#ifdef __ANDROID__\n#include "platform/native_android.c"\n#endif\n', 1)
+              open('main.c', 'w').write(s)
+          c = open('CMakeLists.txt').read()
+          if 'ferror-limit' not in c:
+              old = 'set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-error -g")'
+              new = old + '\nif(ANDROID)\n    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-error=format-security -Wno-format-security -Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error=incompatible-pointer-types -Wno-error=incompatible-function-pointer-types -ferror-limit=0")\nendif()'
+              c = c.replace(old, new, 1)
+              open('CMakeLists.txt', 'w').write(c)
+          PY
+      - name: Install SDK parts
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null || true
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-34" "build-tools;34.0.0" "cmake;3.22.1" "ndk;27.0.12077973"
+      - name: Build
+        working-directory: ctr-native-android-0.1.0/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CTRNative-debug-apk
+          path: ctr-native-android-0.1.0/android/app/build/outputs/apk/debug/*.apk
