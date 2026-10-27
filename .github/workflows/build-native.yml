@@ -14,6 +14,7 @@ jobs:
         working-directory: ctr-native-android-0.1.0
         run: |
           python3 - <<'PY'
+          import re
           s = open('main.c').read()
           if 'native_android.c' not in s:
               s = s.replace('#include <SDL3/SDL_main.h>\n', '#include <SDL3/SDL_main.h>\n#ifdef __ANDROID__\n#include <jni.h>\nchar *Platform_Android_GetStoredPath(void);\nvoid Platform_Android_PickFile(void);\n#endif\n', 1)
@@ -25,7 +26,11 @@ jobs:
               new = old + '\nif(ANDROID)\n    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-error=format-security -Wno-format-security -Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error=incompatible-pointer-types -Wno-error=incompatible-function-pointer-types -ferror-limit=0")\nendif()'
               c = c.replace(old, new, 1)
               open('CMakeLists.txt', 'w').write(c)
+          b = open('android/app/build.gradle').read()
+          b = re.sub(r'\n    signingConfigs \{.*?\n    \}\n', '\n', b, count=1, flags=re.S)
+          open('android/app/build.gradle', 'w').write(b)
           PY
+          rm -f android/app/debug.keystore
       - name: Install SDK parts
         run: |
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null || true
@@ -35,21 +40,6 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon
-      - name: Inspect APK
-        continue-on-error: true
-        run: |
-          APK=$(ls ctr-native-android-0.1.0/android/app/build/outputs/apk/debug/*.apk | head -1)
-          BT=$ANDROID_HOME/build-tools/34.0.0
-          {
-            echo '### Info APK'
-            echo '```'
-            $BT/aapt2 dump badging "$APK" | grep -E "^package|sdkVersion|targetSdk|native-code|launchable"
-            echo
-            $BT/apksigner verify --verbose --print-certs "$APK" 2>&1 | head -20
-            echo
-            unzip -l "$APK" | grep -E "\.so|AndroidManifest|resources.arsc"
-            echo '```'
-          } >> $GITHUB_STEP_SUMMARY
       - uses: actions/upload-artifact@v4
         with:
           name: CTRNative-debug-apk
